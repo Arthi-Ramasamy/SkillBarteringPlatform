@@ -36,6 +36,7 @@ const Layout = ({ children }) => {
     setSnackbarOpen(false);
   };
 
+  
   return (
     <div className="layout-container">
       <nav className="navbar">
