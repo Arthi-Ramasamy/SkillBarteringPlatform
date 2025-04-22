@@ -62,6 +62,7 @@ function MatchesPage() {
   const [tabValue, setTabValue] = useState(0);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadMessages, setUnreadMessages] = useState({});
 
   useEffect(() => {
     if (!currentUser) {
@@ -72,63 +73,85 @@ function MatchesPage() {
     const fetchMatches = async () => {
       setLoading(true);
       const matchList = [];
+      const unreadMessagesTemp = {};
 
-      const querySnapshot = await getDocs(collection(db, "matches"));
-      console.log(
-        "All Matches Documents:",
-        querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
-      );
-      for (const docSnap of querySnapshot.docs) {
-        const data = docSnap.data();
-        console.log(`Processing Match ${docSnap.id}:`, data);
-        if (data.user1 === currentUser.uid || data.user2 === currentUser.uid) {
-          const otherUserId =
-            data.user1 === currentUser.uid ? data.user2 : data.user1;
-          const user1Doc = await getDoc(doc(db, "users", data.user1));
-          const user2Doc = await getDoc(doc(db, "users", data.user2));
-          const user1Name = user1Doc.exists()
-            ? user1Doc.data().displayName || data.user1
-            : data.user1;
-          const user2Name = user2Doc.exists()
-            ? user2Doc.data().displayName || data.user2
-            : data.user2;
-          const otherUserName =
-            data.user1 === currentUser.uid ? user2Name : user1Name;
-          const otherUserDoc = await getDoc(doc(db, "users", otherUserId));
-          const otherUserData = otherUserDoc.exists()
-            ? otherUserDoc.data()
-            : {};
-          const skillsOffered = otherUserData.skillsOffered || [];
-          const offerDescription =
-            skillsOffered.map((s) => s.description).join(" | ") ||
-            "No description available";
-          matchList.push({
-            id: docSnap.id,
-            ...data,
-            otherUserName,
-            otherUserData,
-            offerDescription,
-          });
-          console.log(
-            `Match ${docSnap.id}: user1 = ${data.user1}, user2 = ${data.user2}, otherUserName = ${otherUserName}, status = ${data.status}`
-          );
+      try {
+        const querySnapshot = await getDocs(collection(db, "matches"));
+        console.log(
+          "All Matches Documents:",
+          querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+        );
+        for (const docSnap of querySnapshot.docs) {
+          const data = docSnap.data();
+          console.log(`Processing Match ${docSnap.id}:`, data);
+          if (data.user1 === currentUser.uid || data.user2 === currentUser.uid) {
+            const otherUserId =
+              data.user1 === currentUser.uid ? data.user2 : data.user1;
+            const user1Doc = await getDoc(doc(db, "users", data.user1));
+            const user2Doc = await getDoc(doc(db, "users", data.user2));
+            const user1Name = user1Doc.exists()
+              ? user1Doc.data().displayName || data.user1
+              : data.user1;
+            const user2Name = user2Doc.exists()
+              ? user2Doc.data().displayName || data.user2
+              : data.user2;
+            const otherUserName =
+              data.user1 === currentUser.uid ? user2Name : user1Name;
+            const otherUserDoc = await getDoc(doc(db, "users", otherUserId));
+            const otherUserData = otherUserDoc.exists()
+              ? otherUserDoc.data()
+              : {};
+            const skillsOffered = otherUserData.skillsOffered || [];
+            const offerDescription =
+              skillsOffered.map((s) => s.description).join(" | ") ||
+              "No description available";
+
+            // Fetch unread message count for this match
+            try {
+              const messagesQuery = query(
+                collection(db, "chats", docSnap.id, "messages"),
+                where("receiverId", "==", currentUser.uid),
+                where("read", "==", false)
+              );
+              const messagesSnapshot = await getDocs(messagesQuery);
+              unreadMessagesTemp[docSnap.id] = messagesSnapshot.size;
+            } catch (error) {
+              console.error(`Error fetching messages for match ${docSnap.id}:`, error);
+              unreadMessagesTemp[docSnap.id] = 0; // Fallback to 0
+            }
+
+            matchList.push({
+              id: docSnap.id,
+              ...data,
+              otherUserName,
+              otherUserData,
+              offerDescription,
+            });
+            console.log(
+              `Match ${docSnap.id}: user1 = ${data.user1}, user2 = ${data.user2}, otherUserName = ${otherUserName}, status = ${data.status}`
+            );
+          }
         }
+
+        setMatches(matchList);
+        setUnreadMessages(unreadMessagesTemp);
+        setLoading(false);
+
+        const unread = matchList.filter(
+          (m) => m.status === "pending" && m.user2 === currentUser.uid
+        ).length;
+        setUnreadCount(unread);
+        console.log(
+          "Filtered Matches for Requests Sent:",
+          matchList.filter(
+            (m) => m.status === "pending" && m.user1 === currentUser.uid
+          )
+        );
+        console.log("All Processed Matches:", matchList);
+      } catch (error) {
+        console.error("Error fetching matches:", error);
+        setLoading(false);
       }
-
-      setMatches(matchList);
-      setLoading(false);
-
-      const unread = matchList.filter(
-        (m) => m.status === "pending" && m.user2 === currentUser.uid
-      ).length;
-      setUnreadCount(unread);
-      console.log(
-        "Filtered Matches for Requests Sent:",
-        matchList.filter(
-          (m) => m.status === "pending" && m.user1 === currentUser.uid
-        )
-      );
-      console.log("All Processed Matches:", matchList);
     };
 
     fetchMatches();
@@ -528,9 +551,9 @@ function MatchesPage() {
                     color="primary"
                     startIcon={
                       <Badge
-                        badgeContent={newMessagesCount}
+                        badgeContent={unreadMessages[match.id] || 0}
                         color="error"
-                        invisible={newMessagesCount === 0}
+                        invisible={(unreadMessages[match.id] || 0) === 0}
                       >
                         <ChatIcon />
                       </Badge>
